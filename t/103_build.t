@@ -2,14 +2,13 @@
 #
 # $Project: /Devel-Tokenizer-C $
 # $Author: mhx $
-# $Date: 2003/03/17 21:20:31 +0100 $
-# $Revision: 1 $
-# $Snapshot: /Devel-Tokenizer-C/0.03 $
+# $Date: 2005/01/28 15:01:03 +0100 $
+# $Revision: 3 $
 # $Source: /t/103_build.t $
 #
 ################################################################################
 # 
-# Copyright (c) 2002-2003 Marcus Holland-Moritz. All rights reserved.
+# Copyright (c) 2002-2005 Marcus Holland-Moritz. All rights reserved.
 # This program is free software; you can redistribute it and/or modify
 # it under the same terms as Perl itself.
 # 
@@ -23,28 +22,76 @@ do 't/common.sub';
 
 $^W = 1;
 
-BEGIN { plan tests => 24 }
+BEGIN { plan tests => 192 }
 
 chomp( my @words = <DATA> );
 
 my $skip = can_compile() ? '' : 'skip: cannot run compiler';
 
-run_tests( $skip, \@words, { ppflags => 0, case => 0 } );
-run_tests( $skip, \@words, { ppflags => 1, case => 0 } );
+# TODO: fix this:
 
-run_tests( $skip, \@words, { ppflags => 0, case => 1 } );
-run_tests( $skip, \@words, { ppflags => 1, case => 1 } );
+my @configs = (
+  [ppflags  => [0, 1]],
+  [case     => [0, 1]],
+  [merge    => [0, 1]],
+);
+
+run_tests_rec($skip, \@words, [@configs, [strlen => [0, 1]]], {});
+run_tests_rec($skip, \@words, [@configs, [strategy => [qw(narrow wide)]]], {strlen => 1});
+
+sub run_tests_rec {
+  my($skip, $words, $stack, $config) = @_;
+  my($cfg, @rest) = @$stack;
+  my %config = %$config;
+  for my $o (@{$cfg->[1]}) {
+    if (defined $o) {
+      $config{$cfg->[0]} = $o;
+    }
+    else {
+      delete $config{$cfg->[0]};
+    }
+    if (@rest) {
+      run_tests_rec($skip, $words, \@rest, \%config);
+    }
+    else {
+      run_tests($skip, $words, \%config);
+    }
+  }
+}
 
 sub run_tests {
   my($skip, $words, $options) = @_;
   my $unknown = @$words;
   my %words;
+  my $prefix;
   @words{@$words} = (0 .. $#$words);
 
-  my $t = new Devel::Tokenizer::C TokenFunc     => sub { "return KEY_$_[0];\n" }
-                                , CaseSensitive => $options->{case}
-                                , TokenEnd      => 'TOKEN_END'
-                                ;
+  my @args = ( TokenFunc     => sub { "return KEY_$_[0];\n" }
+             , CaseSensitive => $options->{case}
+             , TokenEnd      => 'TOKEN_END'
+             );
+
+  if ($options->{strlen}) {
+    push @args, StringLength => 'mystrlen';
+    $prefix = <<CODE
+int mystrlen = 0;
+
+while (tokstr[mystrlen] != TOKEN_END)
+  mystrlen++;
+CODE
+  }
+
+  if (exists $options->{strategy}) {
+    push @args, Strategy => $options->{strategy};
+  }
+
+  if ($options->{merge}) {
+    push @args, MergeSwitches => $options->{merge};
+  }
+
+  print "# ", join(', ', @args), "\n";
+
+  my $t = new Devel::Tokenizer::C @args;
 
   my($c, %dir) = 0;
   for( @$words ) {
@@ -60,7 +107,7 @@ sub run_tests {
     $c--;
   }
 
-  my $src = gencode( $t, $words );
+  my $src = gencode( $t, $words, $prefix );
 
   my @ppflags;
   if( $options->{ppflags} ) {

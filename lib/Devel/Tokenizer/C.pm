@@ -1,0 +1,708 @@
+################################################################################
+#
+# MODULE: Devel::Tokenizer::C
+#
+################################################################################
+#
+# DESCRIPTION: Generate C source for fast keyword tokenizer
+#
+################################################################################
+#
+# $Project: /Devel-Tokenizer-C $
+# $Author: mhx $
+# $Date: 2005/01/28 15:07:49 +0100 $
+# $Revision: 11 $
+# $Source: /lib/Devel/Tokenizer/C.pm $
+#
+################################################################################
+# 
+# Copyright (c) 2002-2005 Marcus Holland-Moritz. All rights reserved.
+# This program is free software; you can redistribute it and/or modify
+# it under the same terms as Perl itself.
+# 
+################################################################################
+
+package Devel::Tokenizer::C;
+
+use 5.005_03;
+use strict;
+use Carp;
+use vars '$VERSION';
+
+$VERSION = do { my @r = '$Snapshot: /Devel-Tokenizer-C/0.04 $' =~ /(\d+\.\d+(?:_\d+)?)/; @r ? $r[0] : '9.99' };
+
+my %DEF = (
+  CaseSensitive => 1,
+  # Comments      => 1,                                   # TODO?
+  Indent        => '  ',
+  MergeSwitches => 0,
+  Strategy      => 'ordered',   #  wide, narrow, ordered
+  StringLength  => '',
+  TokenEnd      => "'\\0'",
+  TokenFunc     => sub { "return $_[0];\n" },
+  # TokenSort     => sub { $_[0] cmp $_[1] },             # TODO?
+  TokenString   => 'tokstr',
+  UnknownLabel  => 'unknown',
+);
+
+sub new
+{
+  my $class = shift;
+  my %opt = @_;
+  for (keys %opt) { exists $DEF{$_} or croak "Invalid option '$_'" }
+  if (exists $opt{TokenFunc}) {
+    ref $opt{TokenFunc} eq 'CODE'
+        or croak "Option TokenFunc needs a code reference";
+  }
+  my %self = (
+    %DEF, @_,
+    __tcheck__ => {},
+    __tokens__ => {},
+    __backup__ => [],
+  );
+  if ($self{StringLength} eq '' and $self{Strategy} ne 'ordered') {
+    croak "Cannot use Strategy '$self{Strategy}' without StringLength";
+  }
+  bless \%self, $class;
+}
+
+sub add_tokens
+{
+  my $self = shift;
+  my($tokens, $pre) = ref $_[0] eq 'ARRAY' ? @_ : \@_;
+  for (@$tokens) {
+    my $tok = $self->{CaseSensitive} ? $_ : lc;
+    exists $self->{__tcheck__}{$tok}
+        and carp $self->{__tcheck__}{$tok} eq ($pre || '')
+                 ? "Multiple definition of token '$_'"
+                 : "Redefinition of token '$_'";
+    $self->{__tcheck__}{$tok} = $self->{__tokens__}{$_} = $pre || '';
+  }
+  $self;
+}
+
+sub generate
+{
+  my $self = shift;
+  my %options = (Indent => '', @_);
+  my $IND = $options{Indent};
+  my $I = $self->{Indent};
+
+  if ($self->{StringLength}) {
+    my @tokens;
+    for my $t (keys %{$self->{__tokens__}}) {
+      $tokens[length $t]{$t} = $self->{__tokens__}{$t};
+    }
+
+    my $rv = <<EOS;
+${IND}switch ($self->{StringLength})
+$IND\{
+EOS
+
+    for my $len (1 .. $#tokens) {
+      $tokens[$len] or next;
+      my $count = keys %{$tokens[$len]};
+      my $switch = $self->__makeit__($IND.$I.$I, $self->__order__($tokens[$len]), 0, 0, $tokens[$len]);
+      $rv .= <<EOS;
+$IND${I}case $len: /* $count tokens of length $len */
+$switch
+EOS
+    }
+
+    $rv .= <<EOS;
+$IND${I}default:
+$IND$I${I}goto $self->{UnknownLabel};
+$IND}
+EOS
+  }
+  else {
+    return $self->__makeit__($IND, undef, 0, 0, $self->{__tokens__});
+  }
+}
+
+sub __order__
+{
+  my($self, $tok) = @_;
+  my @hist;
+
+  return undef if $self->{Strategy} eq 'ordered';
+
+  for my $k (keys %$tok) {
+    my @key = ($self->{CaseSensitive} ? $k : uc $k) =~ /(.)/g;
+    for my $i (0 .. $#key) {
+      $hist[$i]{$key[$i]}++;
+    }
+  }
+  for my $i (0 .. $#hist) {
+    $hist[$i]{ix} = $i;
+  }
+
+  if ($self->{Strategy} eq 'wide') {
+    @hist = sort { keys %$b <=> keys %$a } @hist;
+  }
+  elsif ($self->{Strategy} eq 'narrow') {
+    @hist = sort { keys %$a <=> keys %$b } @hist;
+  }
+  else {
+    croak "Invalid Strategy '$self->{Strategy}'";
+  }
+
+  return [map $_->{ix}, @hist];
+}
+
+sub __makeit__
+{
+  my($self, $IND, $order, $level, $pre_flag, $t, %tok) = @_;
+  my $I = $self->{Indent};
+
+  %$t or return '';
+
+  if (keys(%$t) == 1) {
+    my($token) = keys %$t;
+    my($rvs,$code);
+
+    if ($level > length $token) {
+      $rvs = sprintf "%-50s/* %-10s */\n", $IND.'{', $token;
+      $code = $self->{TokenFunc}->($token);
+      $code =~ s/^/$IND$I/mg;
+    }
+    else {
+      my @chars = $token =~ /(.)/g;
+      my $cmp = join " &&\n$IND$I$I",
+                map { $_->[1] } sort { $a->[0] <=> $b->[0] } map {
+                  my $p = defined $order ? $order->[$_] : $_;
+                  [$p, $self->__chr2cmp__($p, "'$chars[$p]'")];
+                } $level .. $#chars;
+
+      if (defined $self->{TokenEnd} and not $self->{StringLength}) {
+        $level = @chars;
+        $cmp and $cmp .= " &&\n$IND$I$I";
+        $cmp .= $self->{TokenString} . "[$level] == $self->{TokenEnd}";
+      }
+
+      $rvs = ($cmp ? $IND . "if ($cmp)\n" : '') .
+             sprintf "%-50s/* %-10s */\n", $IND.'{', $token;
+
+      $code = $self->{TokenFunc}->($token);
+      $code =~ s/^/$IND$I/mg;
+    }
+
+    return "$rvs$code$IND}\n\n$IND"
+          ."goto $self->{UnknownLabel};\n";
+  }
+
+  for my $n (keys %$t) {
+    my $c = substr $n, (defined $order ? $order->[$level] : $level), 1
+            or defined $self->{TokenEnd} or next;
+    $tok{$c ? ($self->{CaseSensitive} ? "'$c'" : "'\U$c\E'") : $self->{TokenEnd}}{$n} = $t->{$n};
+  }
+
+  my $pos = defined $order ? $order->[$level] : $level;
+  my $bke = '';
+  my $rvs = '';
+  my $nlflag = 0;
+
+  if (keys %tok > 1 or !$self->{MergeSwitches}) {
+    if (@{$self->{__backup__}}) {
+      my $cmp = join " &&\n$IND$I$I",
+                map { $_->[1] } sort { $a->[0] <=> $b->[0] }
+                @{$self->{__backup__}};
+      
+      $rvs .= $IND."if ($cmp)\n".$IND."{\n";
+      $bke = "$IND}\n";
+
+      $IND .= $I;
+
+      @{$self->{__backup__}} = ();
+    }
+
+    $rvs .= $IND."switch ($self->{TokenString}\[$pos])\n".$IND."{\n";
+  }
+  else {
+    $bke = "\n${IND}goto $self->{UnknownLabel};\n" unless @{$self->{__backup__}};
+    push @{$self->{__backup__}}, [$pos, $self->__chr2cmp__($pos, keys %tok)];
+  }
+
+  for my $c (sort keys %tok) {
+    my($clear_pre_flag, %seen) = 0;
+    my @pre = grep !$seen{$_}++, values %{$tok{$c}};
+
+    $nlflag and $rvs .= "\n";
+
+    if( $pre_flag == 0 && @pre == 1 && $pre[0] ) {
+      $rvs .= "#if $pre[0]\n";
+      $pre_flag = $clear_pre_flag = 1;
+    }
+
+    if (keys %tok > 1 or !$self->{MergeSwitches}) {
+      $rvs .= $self->{CaseSensitive} || $c !~ /^'[a-zA-Z]'$/
+            ? $IND.$I."case $c:\n"
+            : $IND.$I."case \U$c\E:\n"
+            . $IND.$I."case \L$c\E:\n";
+
+      $rvs .= $self->__makeit__($IND.$I.$I, $order, $level+1, $pre_flag, $tok{$c});
+    }
+    else {
+      $rvs .= $self->__makeit__($IND, $order, $level+1, $pre_flag, $tok{$c});
+    }
+
+    if ($clear_pre_flag) {
+      $rvs .= "#endif /* $pre[0] */\n";
+      $pre_flag = 0;
+    }
+
+    $nlflag = 1;
+  }
+
+  if (keys %tok > 1 || !$self->{MergeSwitches}) {
+    return <<EOS . $bke;
+$rvs
+$IND${I}default:
+$IND$I${I}goto $self->{UnknownLabel};
+$IND}
+EOS
+  }
+  else {
+    return $rvs . $bke;
+  }
+}
+
+sub __chr2cmp__
+{
+  my($self, $p, $c) = @_;
+  $self->{CaseSensitive} || $c !~ /^'[a-zA-Z]'$/
+  ? $self->{TokenString}."[$p] == $c"
+  : '(' . $self->{TokenString} . "[$p] == \U$c\E || "
+        . $self->{TokenString} . "[$p] == \L$c\E)";
+}
+
+1;
+
+__END__
+
+=head1 NAME
+
+Devel::Tokenizer::C - Generate C source for fast keyword tokenizer
+
+=head1 SYNOPSIS
+
+  use Devel::Tokenizer::C;
+  
+  $t = new Devel::Tokenizer::C TokenFunc => sub { "return \U$_[0];\n" };
+  
+  $t->add_tokens(qw( bar baz ))->add_tokens(['for']);
+  $t->add_tokens([qw( foo )], 'defined DIRECTIVE');
+  
+  print $t->generate;
+
+=head1 DESCRIPTION
+
+The Devel::Tokenizer::C module provides a small class for creating
+the essential ANSI C source code for a fast keyword tokenizer.
+
+The generated code is optimized for speed. On the ANSI-C keyword
+set, it's 2-3 times faster than equivalent code generated with
+the C<gprof> utility.
+
+The above example would print the following C source code:
+
+  switch (tokstr[0])
+  {
+    case 'b':
+      switch (tokstr[1])
+      {
+        case 'a':
+          switch (tokstr[2])
+          {
+            case 'r':
+              if (tokstr[3] == '\0')
+              {                                     /* bar        */
+                return BAR;
+              }
+  
+              goto unknown;
+  
+            case 'z':
+              if (tokstr[3] == '\0')
+              {                                     /* baz        */
+                return BAZ;
+              }
+  
+              goto unknown;
+  
+            default:
+              goto unknown;
+          }
+  
+        default:
+          goto unknown;
+      }
+  
+    case 'f':
+      switch (tokstr[1])
+      {
+        case 'o':
+          switch (tokstr[2])
+          {
+  #if defined DIRECTIVE
+            case 'o':
+              if (tokstr[3] == '\0')
+              {                                     /* foo        */
+                return FOO;
+              }
+  
+              goto unknown;
+  #endif /* defined DIRECTIVE */
+  
+            case 'r':
+              if (tokstr[3] == '\0')
+              {                                     /* for        */
+                return FOR;
+              }
+  
+              goto unknown;
+  
+            default:
+              goto unknown;
+          }
+  
+        default:
+          goto unknown;
+      }
+  
+    default:
+      goto unknown;
+  }
+
+So the generated code only includes the main C<switch> statement for
+the tokenizer. You can configure most of the generated code to fit
+for your application.
+
+=head1 CONFIGURATION
+
+=head2 CaseSensitive =E<gt> 0 | 1
+
+Boolean defining whether the generated tokenizer should be case
+sensitive or not. This will only affect the letters A-Z. The
+default is 1, so the generated tokenizer is case sensitive.
+
+=head2 Indent =E<gt> STRING
+
+String to be used for one level of indentation. The default is
+two space characters.
+
+=head2 MergeSwitches =E<gt> 0 | 1
+
+Boolean defining whether nested C<switch> statements containing
+only a single C<case> should be merged into a single C<if> statement.
+This is usually only done at the end of a branch.
+With C<MergeSwitches>, merging will also be done in the middle of
+a branch. E.g. the code
+
+  $t = new Devel::Tokenizer::C
+           TokenFunc     => sub { "return \U$_[0];\n" },
+           MergeSwitches => 1;
+  
+  $t->add_tokens(qw( carport carpet muppet ));
+  
+  print $t->generate;
+
+would output this C<switch> statement:
+
+  switch (tokstr[0])
+  {
+    case 'c':
+      if (tokstr[1] == 'a' &&
+          tokstr[2] == 'r' &&
+          tokstr[3] == 'p')
+      {
+        switch (tokstr[4])
+        {
+          case 'e':
+            if (tokstr[5] == 't' &&
+                tokstr[6] == '\0')
+            {                                       /* carpet     */
+              return CARPET;
+            }
+  
+            goto unknown;
+  
+          case 'o':
+            if (tokstr[5] == 'r' &&
+                tokstr[6] == 't' &&
+                tokstr[7] == '\0')
+            {                                       /* carport    */
+              return CARPORT;
+            }
+  
+            goto unknown;
+  
+          default:
+            goto unknown;
+        }
+      }
+  
+      goto unknown;
+  
+    case 'm':
+      if (tokstr[1] == 'u' &&
+          tokstr[2] == 'p' &&
+          tokstr[3] == 'p' &&
+          tokstr[4] == 'e' &&
+          tokstr[5] == 't' &&
+          tokstr[6] == '\0')
+      {                                             /* muppet     */
+        return MUPPET;
+      }
+  
+      goto unknown;
+  
+    default:
+      goto unknown;
+  }
+
+=head2 Strategy =E<gt> 'ordered' | 'narrow' | 'wide'
+
+The strategy to be used for sorting character positions.
+C<ordered> will leave the characters in their normal order.
+C<narrow> will sort the characters positions so that the
+positions with least character variation are checked first.
+C<wide> will do exactly the opposite. (If you're confused
+now, just try it. ;-)
+
+The default is C<ordered>. You can only use C<narrow> and
+C<wide> together with C<StringLength>.
+
+The code
+
+  $t = new Devel::Tokenizer::C
+           TokenFunc     => sub { "return \U$_[0];\n" },
+           StringLength  => 'len',
+           Strategy      => 'ordered';
+  
+  $t->add_tokens(qw( mhj xho mhx ));
+  
+  print $t->generate;
+
+would output this C<switch> statement:
+
+  switch (len)
+  {
+    case 3: /* 3 tokens of length 3 */
+      switch (tokstr[0])
+      {
+        case 'm':
+          switch (tokstr[1])
+          {
+            case 'h':
+              switch (tokstr[2])
+              {
+                case 'j':
+                  {                                 /* mhj        */
+                    return MHJ;
+                  }
+  
+                  goto unknown;
+  
+                case 'x':
+                  {                                 /* mhx        */
+                    return MHX;
+                  }
+  
+                  goto unknown;
+  
+                default:
+                  goto unknown;
+              }
+  
+            default:
+              goto unknown;
+          }
+  
+        case 'x':
+          if (tokstr[1] == 'h' &&
+              tokstr[2] == 'o')
+          {                                         /* xho        */
+            return XHO;
+          }
+  
+          goto unknown;
+  
+        default:
+          goto unknown;
+      }
+  
+    default:
+      goto unknown;
+  }
+
+Using the C<narrow> strategy, the C<switch> statement would be:
+
+  switch (len)
+  {
+    case 3: /* 3 tokens of length 3 */
+      switch (tokstr[1])
+      {
+        case 'h':
+          switch (tokstr[0])
+          {
+            case 'm':
+              switch (tokstr[2])
+              {
+                case 'j':
+                  {                                 /* mhj        */
+                    return MHJ;
+                  }
+  
+                  goto unknown;
+  
+                case 'x':
+                  {                                 /* mhx        */
+                    return MHX;
+                  }
+  
+                  goto unknown;
+  
+                default:
+                  goto unknown;
+              }
+  
+            case 'x':
+              if (tokstr[2] == 'o')
+              {                                     /* xho        */
+                return XHO;
+              }
+  
+              goto unknown;
+  
+            default:
+              goto unknown;
+          }
+  
+        default:
+          goto unknown;
+      }
+  
+    default:
+      goto unknown;
+  }
+
+Using the C<wide> strategy, the C<switch> statement would be:
+
+  switch (len)
+  {
+    case 3: /* 3 tokens of length 3 */
+      switch (tokstr[2])
+      {
+        case 'j':
+          if (tokstr[0] == 'm' &&
+              tokstr[1] == 'h')
+          {                                         /* mhj        */
+            return MHJ;
+          }
+  
+          goto unknown;
+  
+        case 'o':
+          if (tokstr[0] == 'x' &&
+              tokstr[1] == 'h')
+          {                                         /* xho        */
+            return XHO;
+          }
+  
+          goto unknown;
+  
+        case 'x':
+          if (tokstr[0] == 'm' &&
+              tokstr[1] == 'h')
+          {                                         /* mhx        */
+            return MHX;
+          }
+  
+          goto unknown;
+  
+        default:
+          goto unknown;
+      }
+  
+    default:
+      goto unknown;
+  }
+
+=head2 StringLength =E<gt> STRING
+
+Identifier of the C variable that contains the length of the
+string, when available. If the string length is know, switching
+can be done more effectively. That doesn't mean that it is more
+effective to compute the string length first. If you don't know
+the string length, just don't use this option. This is also the
+default.
+
+=head2 TokenEnd =E<gt> STRING
+
+Character that defines the end of each token. The default is the
+null character C<'\0'>. Can also be C<undef> if tokens don't end
+with a special character.
+
+=head2 TokenFunc =E<gt> SUBROUTINE
+
+A reference to the subroutine that returns the code for each token
+match. The only parameter to the subroutine is the token string.
+
+This is the default subroutine:
+
+  TokenFunc => sub { "return $_[0];\n" }
+
+=head2 TokenString =E<gt> STRING
+
+Identifier of the C character array that contains the token string.
+The default is C<tokstr>.
+
+=head2 UnknownLabel =E<gt> STRING
+
+Label that should be jumped to via C<goto> if there's no keyword
+matching the token. The default is C<unknown>.
+
+=head1 ADDING TOKENS
+
+You can add tokens using the C<add_tokens> method.
+
+The method either takes a list of token strings or a reference
+to an array of token strings which can optionally be followed
+by a preprocessor directive string.
+
+Calls to C<add_tokens> can be chained together, as the method
+returns a reference to its object.
+
+=head1 GENERATING THE CODE
+
+The C<generate> method will return a string with the tokenizer
+C<switch> statement. If no tokens were added, it will return an
+empty string.
+
+You can optionally pass an C<Indent> option to the C<generate>
+method to specify a string used for indenting the whole
+C<switch> statement, e.g.:
+
+  print $t->generate(Indent => "\t");
+
+This is completely independent from the C<Indent> option passed
+to the constructor.
+
+=head1 AUTHOR
+
+Marcus Holland-Moritz E<lt>mhx@cpan.orgE<gt>
+
+=head1 BUGS
+
+I hope none, since the code is pretty short.
+Perhaps lack of functionality ;-)
+
+=head1 COPYRIGHT
+
+Copyright (c) 2002-2005, Marcus Holland-Moritz. All rights reserved.
+This module is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself.
+
+=cut
+

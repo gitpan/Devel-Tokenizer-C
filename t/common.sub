@@ -2,14 +2,13 @@
 #
 # $Project: /Devel-Tokenizer-C $
 # $Author: mhx $
-# $Date: 2003/06/11 03:26:14 +0200 $
-# $Revision: 2 $
-# $Snapshot: /Devel-Tokenizer-C/0.03 $
+# $Date: 2005/01/28 15:01:04 +0100 $
+# $Revision: 4 $
 # $Source: /t/common.sub $
 #
 ################################################################################
 # 
-# Copyright (c) 2002-2003 Marcus Holland-Moritz. All rights reserved.
+# Copyright (c) 2002-2005 Marcus Holland-Moritz. All rights reserved.
 # This program is free software; you can redistribute it and/or modify
 # it under the same terms as Perl itself.
 # 
@@ -21,7 +20,9 @@ use IPC::Open3;
 
 sub gencode
 {
-  my($dtc, $words) = @_;
+  my($dtc, $words, $prefix) = @_;
+
+  $prefix ||= '';
 
   my $code = $dtc->generate;
   my $enum = join "\n", map "  KEY_$_,", @$words;
@@ -38,6 +39,7 @@ $enum
 
 Keyword tokenize( const char *tokstr )
 {
+$prefix
 $code
 unknown:
   return KEY_UNKNOWN;
