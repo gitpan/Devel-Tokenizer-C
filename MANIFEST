@@ -1,0 +1,10 @@
+C.pm
+Changes
+MANIFEST
+Makefile.PL
+README
+t/001_init.t
+t/101_misc.t
+t/102_warnings.t
+t/103_build.t
+t/common.sub
