@@ -10,8 +10,8 @@
 #
 # $Project: /Devel-Tokenizer-C $
 # $Author: mhx $
-# $Date: 2005/01/28 15:07:49 +0100 $
-# $Revision: 11 $
+# $Date: 2005/02/14 18:30:15 +0100 $
+# $Revision: 12 $
 # $Source: /lib/Devel/Tokenizer/C.pm $
 #
 ################################################################################
@@ -29,7 +29,7 @@ use strict;
 use Carp;
 use vars '$VERSION';
 
-$VERSION = do { my @r = '$Snapshot: /Devel-Tokenizer-C/0.04 $' =~ /(\d+\.\d+(?:_\d+)?)/; @r ? $r[0] : '9.99' };
+$VERSION = do { my @r = '$Snapshot: /Devel-Tokenizer-C/0.05 $' =~ /(\d+\.\d+(?:_\d+)?)/; @r ? $r[0] : '9.99' };
 
 my %DEF = (
   CaseSensitive => 1,
@@ -160,6 +160,7 @@ sub __makeit__
   if (keys(%$t) == 1) {
     my($token) = keys %$t;
     my($rvs,$code);
+    my $goto = '';
 
     if ($level > length $token) {
       $rvs = sprintf "%-50s/* %-10s */\n", $IND.'{', $token;
@@ -180,6 +181,8 @@ sub __makeit__
         $cmp .= $self->{TokenString} . "[$level] == $self->{TokenEnd}";
       }
 
+      $goto = "\n${IND}goto $self->{UnknownLabel};\n" if $cmp;
+
       $rvs = ($cmp ? $IND . "if ($cmp)\n" : '') .
              sprintf "%-50s/* %-10s */\n", $IND.'{', $token;
 
@@ -187,8 +190,7 @@ sub __makeit__
       $code =~ s/^/$IND$I/mg;
     }
 
-    return "$rvs$code$IND}\n\n$IND"
-          ."goto $self->{UnknownLabel};\n";
+    return "$rvs$code$IND}\n$goto";
   }
 
   for my $n (keys %$t) {
