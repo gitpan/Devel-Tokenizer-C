@@ -10,9 +10,9 @@
 #
 # $Project: /Devel-Tokenizer-C $
 # $Author: mhx $
-# $Date: 2003/03/17 21:36:58 +0100 $
-# $Revision: 2 $
-# $Snapshot: /Devel-Tokenizer-C/0.01 $
+# $Date: 2003/06/11 03:27:51 +0200 $
+# $Revision: 3 $
+# $Snapshot: /Devel-Tokenizer-C/0.03 $
 # $Source: /C.pm $
 #
 ################################################################################
@@ -30,7 +30,7 @@ use strict;
 use Carp;
 use vars '$VERSION';
 
-$VERSION = sprintf '%.2f', 0.01*('$Revision: 2 $' =~ /(\d+)/)[0];
+$VERSION = do { my @r = '$Snapshot: /Devel-Tokenizer-C/0.03 $' =~ /(\d+\.\d+(?:_\d+)?)/; @r ? $r[0] : '9.99' };
 
 my %DEF = (
   CaseSensitive => 1,

@@ -2,9 +2,9 @@
 #
 # $Project: /Devel-Tokenizer-C $
 # $Author: mhx $
-# $Date: 2003/03/17 21:20:07 +0100 $
-# $Revision: 1 $
-# $Snapshot: /Devel-Tokenizer-C/0.01 $
+# $Date: 2003/06/11 03:28:26 +0200 $
+# $Revision: 2 $
+# $Snapshot: /Devel-Tokenizer-C/0.03 $
 # $Source: /Makefile.PL $
 #
 ################################################################################
@@ -19,10 +19,8 @@ use 5.005_03;
 use ExtUtils::MakeMaker;
 
 WriteMakefile(
-  'NAME'            => 'Devel::Tokenizer::C',
-  'VERSION'         => do { my @r = '$Snapshot: /Devel-Tokenizer-C/0.01 $'
-                                    =~ /(\d+\.\d+(?:_\d+)?)/;
-                            @r ? $r[0] : '9.99' },
-  'ABSTRACT'        => 'Generate C source for fast keyword tokenizer',
-  'AUTHOR'          => 'Marcus Holland-Moritz <mhx@cpan.org>',
+  'NAME'         => 'Devel::Tokenizer::C',
+  'VERSION_FROM' => 'C.pm',
+  'ABSTRACT'     => 'Generate C source for fast keyword tokenizer',
+  'AUTHOR'       => 'Marcus Holland-Moritz <mhx@cpan.org>',
 );
