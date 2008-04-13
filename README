@@ -37,7 +37,7 @@ different make program, such as 'nmake', instead of 'make'.
 3. COPYRIGHT
 ------------
 
-Copyright (c) 2002-2005 Marcus Holland-Moritz. All rights reserved.
+Copyright (c) 2002-2008 Marcus Holland-Moritz. All rights reserved.
 This program is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself.
 

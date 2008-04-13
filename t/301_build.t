@@ -2,13 +2,13 @@
 #
 # $Project: /Devel-Tokenizer-C $
 # $Author: mhx $
-# $Date: 2005/01/28 15:01:03 +0100 $
-# $Revision: 3 $
-# $Source: /t/103_build.t $
+# $Date: 2008/04/13 13:31:00 +0200 $
+# $Revision: 6 $
+# $Source: /t/301_build.t $
 #
 ################################################################################
 # 
-# Copyright (c) 2002-2005 Marcus Holland-Moritz. All rights reserved.
+# Copyright (c) 2002-2008 Marcus Holland-Moritz. All rights reserved.
 # This program is free software; you can redistribute it and/or modify
 # it under the same terms as Perl itself.
 # 
@@ -22,24 +22,25 @@ do 't/common.sub';
 
 $^W = 1;
 
-BEGIN { plan tests => 192 }
+BEGIN { plan tests => 384 }
 
-chomp( my @words = <DATA> );
+chomp(my @words = <DATA>);
+$_ = eval qq("$_") for @words;
 
 my $skip = can_compile() ? '' : 'skip: cannot run compiler';
-
-# TODO: fix this:
 
 my @configs = (
   [ppflags  => [0, 1]],
   [case     => [0, 1]],
   [merge    => [0, 1]],
+  [comments => [0, 1]],
 );
 
 run_tests_rec($skip, \@words, [@configs, [strlen => [0, 1]]], {});
 run_tests_rec($skip, \@words, [@configs, [strategy => [qw(narrow wide)]]], {strlen => 1});
 
-sub run_tests_rec {
+sub run_tests_rec
+{
   my($skip, $words, $stack, $config) = @_;
   my($cfg, @rest) = @$stack;
   my %config = %$config;
@@ -59,14 +60,15 @@ sub run_tests_rec {
   }
 }
 
-sub run_tests {
+sub run_tests
+{
   my($skip, $words, $options) = @_;
   my $unknown = @$words;
   my %words;
   my $prefix;
   @words{@$words} = (0 .. $#$words);
 
-  my @args = ( TokenFunc     => sub { "return KEY_$_[0];\n" }
+  my @args = ( TokenFunc     => sub { "return KEY_".get_key($_[0]).";\n" }
              , CaseSensitive => $options->{case}
              , TokenEnd      => 'TOKEN_END'
              );
@@ -89,6 +91,10 @@ CODE
     push @args, MergeSwitches => $options->{merge};
   }
 
+  if ($options->{comments}) {
+    push @args, Comments => $options->{comments};
+  }
+
   print "# ", join(', ', @args), "\n";
 
   my $t = new Devel::Tokenizer::C @args;
@@ -97,8 +103,8 @@ CODE
   for( @$words ) {
     unless( $c ) {
       $c = int( 1 + rand( length ) );
-      $dir{uc $_}++;
-      $t->add_tokens( [$_], "defined HAVE_\U$_" );
+      $dir{uc get_key($_)}++;
+      $t->add_tokens( [$_], "defined HAVE_".uc(get_key($_)) );
     }
     else {
       $t->add_tokens( [$_] );
@@ -136,7 +142,7 @@ CODE
     push @in, @p;
 
     if( exists $words{$k} ) {
-      if( exists $dir{uc $k} ) {
+      if( exists $dir{uc get_key($k)} ) {
         push @ref, map [$_ => $unknown], @p;
       }
       else {
@@ -163,7 +169,7 @@ CODE
         $fail++;
       }
       if( $ref->[1] ne $val ) {
-        print "# wrong value, expected $ref->[1], got $val\n";
+        print "# [$key] wrong value, expected $ref->[1], got $val\n";
         $fail++;
       }
       $count++;
@@ -177,8 +183,10 @@ CODE
 sub rand_key
 {
   my $key = '';
-  my @letters = ('a' .. 'z', 'A' .. 'Z', '0' .. '9', qw( _ . : ; . ' + * ? ! " § $ % [ ] & / < > = } { ));
-  for( 0 .. rand(30) ) {
+  my @letters = ('a' .. 'z', 'A' .. 'Z', '0' .. '9',
+                 qw( _ . : ; . ' + * ? ! " $ % [ ] & / < > = } { ),
+                 '\t');
+  for (0 .. rand(30)) {
     $key .= $letters[rand @letters];
   }
   $key;
@@ -687,3 +695,4 @@ wride
 xenomorphosis
 xiphiid
 zac
+t\tab

@@ -1,4 +1,13 @@
 -------------------------
+Version 0.06 (2008-04-13)
+-------------------------
+
+* add Comments configuration option
+* handle special characters like tabs (\t) correctly
+* add pod tests
+* add license tag
+
+-------------------------
 Version 0.05 (2005-02-14)
 -------------------------
 

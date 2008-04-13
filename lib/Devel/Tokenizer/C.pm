@@ -10,13 +10,13 @@
 #
 # $Project: /Devel-Tokenizer-C $
 # $Author: mhx $
-# $Date: 2005/02/14 18:30:15 +0100 $
-# $Revision: 12 $
+# $Date: 2008/04/13 13:31:00 +0200 $
+# $Revision: 14 $
 # $Source: /lib/Devel/Tokenizer/C.pm $
 #
 ################################################################################
 # 
-# Copyright (c) 2002-2005 Marcus Holland-Moritz. All rights reserved.
+# Copyright (c) 2002-2008 Marcus Holland-Moritz. All rights reserved.
 # This program is free software; you can redistribute it and/or modify
 # it under the same terms as Perl itself.
 # 
@@ -29,11 +29,11 @@ use strict;
 use Carp;
 use vars '$VERSION';
 
-$VERSION = do { my @r = '$Snapshot: /Devel-Tokenizer-C/0.05 $' =~ /(\d+\.\d+(?:_\d+)?)/; @r ? $r[0] : '9.99' };
+$VERSION = do { my @r = '$Snapshot: /Devel-Tokenizer-C/0.06 $' =~ /(\d+\.\d+(?:_\d+)?)/; @r ? $r[0] : '9.99' };
 
 my %DEF = (
   CaseSensitive => 1,
-  # Comments      => 1,                                   # TODO?
+  Comments      => 1,
   Indent        => '  ',
   MergeSwitches => 0,
   Strategy      => 'ordered',   #  wide, narrow, ordered
@@ -59,6 +59,7 @@ sub new
     __tcheck__ => {},
     __tokens__ => {},
     __backup__ => [],
+    __maxlen__ => 0,
   );
   if ($self{StringLength} eq '' and $self{Strategy} ne 'ordered') {
     croak "Cannot use Strategy '$self{Strategy}' without StringLength";
@@ -77,6 +78,8 @@ sub add_tokens
                  ? "Multiple definition of token '$_'"
                  : "Redefinition of token '$_'";
     $self->{__tcheck__}{$tok} = $self->{__tokens__}{$_} = $pre || '';
+    my $len = length __quotecomment__($_);
+    $self->{__maxlen__} = $len if $len > $self->{__maxlen__};
   }
   $self;
 }
@@ -150,6 +153,13 @@ sub __order__
   return [map $_->{ix}, @hist];
 }
 
+sub __commented__
+{
+  my($self, $code, $comment) = @_;
+  return "$code\n" unless $self->{Comments};
+  sprintf "%-50s/* %-$self->{__maxlen__}s */\n", $code, __quotecomment__($comment);
+}
+
 sub __makeit__
 {
   my($self, $IND, $order, $level, $pre_flag, $t, %tok) = @_;
@@ -163,7 +173,7 @@ sub __makeit__
     my $goto = '';
 
     if ($level > length $token) {
-      $rvs = sprintf "%-50s/* %-10s */\n", $IND.'{', $token;
+      $rvs = $self->__commented__($IND.'{', $token);
       $code = $self->{TokenFunc}->($token);
       $code =~ s/^/$IND$I/mg;
     }
@@ -172,7 +182,7 @@ sub __makeit__
       my $cmp = join " &&\n$IND$I$I",
                 map { $_->[1] } sort { $a->[0] <=> $b->[0] } map {
                   my $p = defined $order ? $order->[$_] : $_;
-                  [$p, $self->__chr2cmp__($p, "'$chars[$p]'")];
+                  [$p, $self->__chr2cmp__($p, "'".__quotechar__($chars[$p])."'")];
                 } $level .. $#chars;
 
       if (defined $self->{TokenEnd} and not $self->{StringLength}) {
@@ -183,8 +193,7 @@ sub __makeit__
 
       $goto = "\n${IND}goto $self->{UnknownLabel};\n" if $cmp;
 
-      $rvs = ($cmp ? $IND . "if ($cmp)\n" : '') .
-             sprintf "%-50s/* %-10s */\n", $IND.'{', $token;
+      $rvs = ($cmp ? $IND . "if ($cmp)\n" : '') .  $self->__commented__($IND.'{', $token);
 
       $code = $self->{TokenFunc}->($token);
       $code =~ s/^/$IND$I/mg;
@@ -194,9 +203,10 @@ sub __makeit__
   }
 
   for my $n (keys %$t) {
-    my $c = substr $n, (defined $order ? $order->[$level] : $level), 1
+    my $c = __quotechar__(substr $n, (defined $order ? $order->[$level] : $level), 1)
             or defined $self->{TokenEnd} or next;
-    $tok{$c ? ($self->{CaseSensitive} ? "'$c'" : "'\U$c\E'") : $self->{TokenEnd}}{$n} = $t->{$n};
+    $tok{$c ne '' ? ($self->{CaseSensitive} || $c !~ /^[a-zA-Z]$/ ? "'$c'" : "'\U$c\E'")
+                  : $self->{TokenEnd}}{$n} = $t->{$n};
   }
 
   my $pos = defined $order ? $order->[$level] : $level;
@@ -249,7 +259,8 @@ sub __makeit__
     }
 
     if ($clear_pre_flag) {
-      $rvs .= "#endif /* $pre[0] */\n";
+      my $cmt = $self->{Comments} ? " /* $pre[0] */" : '';
+      $rvs .= "#endif$cmt\n";
       $pre_flag = 0;
     }
 
@@ -267,6 +278,24 @@ EOS
   else {
     return $rvs . $bke;
   }
+}
+
+sub __quotechar__
+{
+  my $str = shift;
+  $str =~ s/(['\\])/\\$1/g;
+  return __quotecomment__($str);
+}
+
+sub __quotecomment__
+{
+  my $str = shift;
+  for my $c (qw( a b f n r t )) {
+    my $e = eval qq("\\$c");
+    $str =~ s/$e/\\$c/g;
+  }
+  $str =~ s/([\x01-\x1F])/sprintf "\\%o", ord($1)/eg;
+  return $str;
 }
 
 sub __chr2cmp__
@@ -290,7 +319,7 @@ Devel::Tokenizer::C - Generate C source for fast keyword tokenizer
 
   use Devel::Tokenizer::C;
   
-  $t = new Devel::Tokenizer::C TokenFunc => sub { "return \U$_[0];\n" };
+  $t = Devel::Tokenizer::C->new(TokenFunc => sub { "return \U$_[0];\n" });
   
   $t->add_tokens(qw( bar baz ))->add_tokens(['for']);
   $t->add_tokens([qw( foo )], 'defined DIRECTIVE');
@@ -318,7 +347,7 @@ The above example would print the following C source code:
           {
             case 'r':
               if (tokstr[3] == '\0')
-              {                                     /* bar        */
+              {                                     /* bar */
                 return BAR;
               }
   
@@ -326,7 +355,7 @@ The above example would print the following C source code:
   
             case 'z':
               if (tokstr[3] == '\0')
-              {                                     /* baz        */
+              {                                     /* baz */
                 return BAZ;
               }
   
@@ -349,7 +378,7 @@ The above example would print the following C source code:
   #if defined DIRECTIVE
             case 'o':
               if (tokstr[3] == '\0')
-              {                                     /* foo        */
+              {                                     /* foo */
                 return FOO;
               }
   
@@ -358,7 +387,7 @@ The above example would print the following C source code:
   
             case 'r':
               if (tokstr[3] == '\0')
-              {                                     /* for        */
+              {                                     /* for */
                 return FOR;
               }
   
@@ -380,20 +409,29 @@ So the generated code only includes the main C<switch> statement for
 the tokenizer. You can configure most of the generated code to fit
 for your application.
 
-=head1 CONFIGURATION
+=head1 METHODS
 
-=head2 CaseSensitive =E<gt> 0 | 1
+=head2 new
+
+The following configuration options can be passed to the constructor.
+
+=head3 CaseSensitive =E<gt> 0 | 1
 
 Boolean defining whether the generated tokenizer should be case
 sensitive or not. This will only affect the letters A-Z. The
 default is 1, so the generated tokenizer is case sensitive.
 
-=head2 Indent =E<gt> STRING
+=head3 Comments =E<gt> 0 | 1
+
+Boolean defining whether the generated code should contain comments
+or not. The default is 1, so comments will be generated.
+
+=head3 Indent =E<gt> STRING
 
 String to be used for one level of indentation. The default is
 two space characters.
 
-=head2 MergeSwitches =E<gt> 0 | 1
+=head3 MergeSwitches =E<gt> 0 | 1
 
 Boolean defining whether nested C<switch> statements containing
 only a single C<case> should be merged into a single C<if> statement.
@@ -401,9 +439,10 @@ This is usually only done at the end of a branch.
 With C<MergeSwitches>, merging will also be done in the middle of
 a branch. E.g. the code
 
-  $t = new Devel::Tokenizer::C
-           TokenFunc     => sub { "return \U$_[0];\n" },
-           MergeSwitches => 1;
+  $t = Devel::Tokenizer::C->new(
+         TokenFunc     => sub { "return \U$_[0];\n" },
+         MergeSwitches => 1,
+       );
   
   $t->add_tokens(qw( carport carpet muppet ));
   
@@ -423,7 +462,7 @@ would output this C<switch> statement:
           case 'e':
             if (tokstr[5] == 't' &&
                 tokstr[6] == '\0')
-            {                                       /* carpet     */
+            {                                       /* carpet  */
               return CARPET;
             }
   
@@ -433,7 +472,7 @@ would output this C<switch> statement:
             if (tokstr[5] == 'r' &&
                 tokstr[6] == 't' &&
                 tokstr[7] == '\0')
-            {                                       /* carport    */
+            {                                       /* carport */
               return CARPORT;
             }
   
@@ -453,7 +492,7 @@ would output this C<switch> statement:
           tokstr[4] == 'e' &&
           tokstr[5] == 't' &&
           tokstr[6] == '\0')
-      {                                             /* muppet     */
+      {                                             /* muppet  */
         return MUPPET;
       }
   
@@ -463,7 +502,7 @@ would output this C<switch> statement:
       goto unknown;
   }
 
-=head2 Strategy =E<gt> 'ordered' | 'narrow' | 'wide'
+=head3 Strategy =E<gt> 'ordered' | 'narrow' | 'wide'
 
 The strategy to be used for sorting character positions.
 C<ordered> will leave the characters in their normal order.
@@ -477,10 +516,11 @@ C<wide> together with C<StringLength>.
 
 The code
 
-  $t = new Devel::Tokenizer::C
-           TokenFunc     => sub { "return \U$_[0];\n" },
-           StringLength  => 'len',
-           Strategy      => 'ordered';
+  $t = Devel::Tokenizer::C->new(
+         TokenFunc     => sub { "return \U$_[0];\n" },
+         StringLength  => 'len',
+         Strategy      => 'ordered',
+       );
   
   $t->add_tokens(qw( mhj xho mhx ));
   
@@ -500,18 +540,14 @@ would output this C<switch> statement:
               switch (tokstr[2])
               {
                 case 'j':
-                  {                                 /* mhj        */
+                  {                                 /* mhj */
                     return MHJ;
                   }
   
-                  goto unknown;
-  
                 case 'x':
-                  {                                 /* mhx        */
+                  {                                 /* mhx */
                     return MHX;
                   }
-  
-                  goto unknown;
   
                 default:
                   goto unknown;
@@ -524,7 +560,7 @@ would output this C<switch> statement:
         case 'x':
           if (tokstr[1] == 'h' &&
               tokstr[2] == 'o')
-          {                                         /* xho        */
+          {                                         /* xho */
             return XHO;
           }
   
@@ -552,18 +588,14 @@ Using the C<narrow> strategy, the C<switch> statement would be:
               switch (tokstr[2])
               {
                 case 'j':
-                  {                                 /* mhj        */
+                  {                                 /* mhj */
                     return MHJ;
                   }
   
-                  goto unknown;
-  
                 case 'x':
-                  {                                 /* mhx        */
+                  {                                 /* mhx */
                     return MHX;
                   }
-  
-                  goto unknown;
   
                 default:
                   goto unknown;
@@ -571,7 +603,7 @@ Using the C<narrow> strategy, the C<switch> statement would be:
   
             case 'x':
               if (tokstr[2] == 'o')
-              {                                     /* xho        */
+              {                                     /* xho */
                 return XHO;
               }
   
@@ -599,7 +631,7 @@ Using the C<wide> strategy, the C<switch> statement would be:
         case 'j':
           if (tokstr[0] == 'm' &&
               tokstr[1] == 'h')
-          {                                         /* mhj        */
+          {                                         /* mhj */
             return MHJ;
           }
   
@@ -608,7 +640,7 @@ Using the C<wide> strategy, the C<switch> statement would be:
         case 'o':
           if (tokstr[0] == 'x' &&
               tokstr[1] == 'h')
-          {                                         /* xho        */
+          {                                         /* xho */
             return XHO;
           }
   
@@ -617,7 +649,7 @@ Using the C<wide> strategy, the C<switch> statement would be:
         case 'x':
           if (tokstr[0] == 'm' &&
               tokstr[1] == 'h')
-          {                                         /* mhx        */
+          {                                         /* mhx */
             return MHX;
           }
   
@@ -631,7 +663,7 @@ Using the C<wide> strategy, the C<switch> statement would be:
       goto unknown;
   }
 
-=head2 StringLength =E<gt> STRING
+=head3 StringLength =E<gt> STRING
 
 Identifier of the C variable that contains the length of the
 string, when available. If the string length is know, switching
@@ -640,13 +672,13 @@ effective to compute the string length first. If you don't know
 the string length, just don't use this option. This is also the
 default.
 
-=head2 TokenEnd =E<gt> STRING
+=head3 TokenEnd =E<gt> STRING
 
 Character that defines the end of each token. The default is the
 null character C<'\0'>. Can also be C<undef> if tokens don't end
 with a special character.
 
-=head2 TokenFunc =E<gt> SUBROUTINE
+=head3 TokenFunc =E<gt> SUBROUTINE
 
 A reference to the subroutine that returns the code for each token
 match. The only parameter to the subroutine is the token string.
@@ -655,17 +687,21 @@ This is the default subroutine:
 
   TokenFunc => sub { "return $_[0];\n" }
 
-=head2 TokenString =E<gt> STRING
+It is the responsibility of the supplier of this routine to make
+the code exit out of the generated code once a token is matched,
+otherwise the behaviour of the generated code is undefined.
+
+=head3 TokenString =E<gt> STRING
 
 Identifier of the C character array that contains the token string.
 The default is C<tokstr>.
 
-=head2 UnknownLabel =E<gt> STRING
+=head3 UnknownLabel =E<gt> STRING
 
 Label that should be jumped to via C<goto> if there's no keyword
 matching the token. The default is C<unknown>.
 
-=head1 ADDING TOKENS
+=head2 add_tokens
 
 You can add tokens using the C<add_tokens> method.
 
@@ -674,9 +710,9 @@ to an array of token strings which can optionally be followed
 by a preprocessor directive string.
 
 Calls to C<add_tokens> can be chained together, as the method
-returns a reference to its object.
+returns a reference to its calling object.
 
-=head1 GENERATING THE CODE
+=head2 generate
 
 The C<generate> method will return a string with the tokenizer
 C<switch> statement. If no tokens were added, it will return an
@@ -702,7 +738,7 @@ Perhaps lack of functionality ;-)
 
 =head1 COPYRIGHT
 
-Copyright (c) 2002-2005, Marcus Holland-Moritz. All rights reserved.
+Copyright (c) 2002-2008, Marcus Holland-Moritz. All rights reserved.
 This module is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself.
 
