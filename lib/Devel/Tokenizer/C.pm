@@ -29,7 +29,7 @@ use strict;
 use Carp;
 use vars '$VERSION';
 
-$VERSION = do { my @r = '$Snapshot: /Devel-Tokenizer-C/0.06 $' =~ /(\d+\.\d+(?:_\d+)?)/; @r ? $r[0] : '9.99' };
+$VERSION = do { my @r = '$Snapshot: /Devel-Tokenizer-C/0.07 $' =~ /(\d+\.\d+(?:_\d+)?)/; @r ? $r[0] : '9.99' };
 
 my %DEF = (
   CaseSensitive => 1,

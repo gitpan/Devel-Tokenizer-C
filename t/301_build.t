@@ -2,8 +2,8 @@
 #
 # $Project: /Devel-Tokenizer-C $
 # $Author: mhx $
-# $Date: 2008/04/13 13:31:00 +0200 $
-# $Revision: 6 $
+# $Date: 2008/04/19 18:05:27 +0200 $
+# $Revision: 8 $
 # $Source: /t/301_build.t $
 #
 ################################################################################
@@ -64,9 +64,10 @@ sub run_tests
 {
   my($skip, $words, $options) = @_;
   my $unknown = @$words;
-  my %words;
+  my(%words, %ucwords);
   my $prefix;
   @words{@$words} = (0 .. $#$words);
+  @ucwords{map uc, @$words} = (1)x@$words;
 
   my @args = ( TokenFunc     => sub { "return KEY_".get_key($_[0]).";\n" }
              , CaseSensitive => $options->{case}
@@ -130,13 +131,18 @@ CODE
   print "# generating random words\n";
   while( @test < 1000 ) {
     my $key = rand_key();
-    exists $words{$key} or push @test, $key;
+    if (exists $ucwords{uc($key)}) {
+      print "# skipping [$key]\n";
+    }
+    else {
+      push @test, $key;
+    }
   }
 
   my(@in, @ref);
 
   for my $k ( @test ) {
-    my($up, $lo, $rev) = ($k)x3;
+    my($up, $lo, $rev) = (uc($k), lc($k), $k);
     $rev =~ tr/a-zA-Z/A-Za-z/;
     my @p = ($k, $up, $lo, $rev);
     push @in, @p;
@@ -157,26 +163,26 @@ CODE
   my($out) = runtest( $skip, $src, \@in, ccflags => \@ppflags );
 
   my $count = -1;
-  my $fail  = -1;
+  my @fail;
 
   if( defined $out ) {
-    $count = $fail = 0;
+    $count = 0;
     for( @$out ) {
       my($key, $val) = /"(.*)"\s+=>\s+(\d+)/ or next;
       my $ref = shift @ref;
       if( $ref->[0] ne $key ) {
-        print "# wrong keyword, expected $ref->[0], got $key\n";
-        $fail++;
+        print "# [$count] wrong keyword, expected $ref->[0], got $key\n";
+        push @fail, "[$count] $key";
       }
       if( $ref->[1] ne $val ) {
-        print "# [$key] wrong value, expected $ref->[1], got $val\n";
-        $fail++;
+        print "# [$count] [$key] wrong value, expected $ref->[1], got $val\n";
+        push @fail, "[$count] $key ($val)";
       }
       $count++;
     }
   }
 
-  skip( $skip, $fail, 0, "recognition failed" );
+  skip( $skip, scalar @fail, 0, "recognition failed (".join(", ", @fail).")" );
   skip( $skip, $count, 4000, "invalid number of words parsed" );
 }
 

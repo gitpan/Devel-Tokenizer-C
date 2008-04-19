@@ -2,8 +2,8 @@
 #
 # $Project: /Devel-Tokenizer-C $
 # $Author: mhx $
-# $Date: 2008/04/13 13:30:58 +0200 $
-# $Revision: 6 $
+# $Date: 2008/04/19 18:05:15 +0200 $
+# $Revision: 7 $
 # $Source: /Makefile.PL $
 #
 ################################################################################
@@ -19,9 +19,14 @@ use strict;
 
 use ExtUtils::MakeMaker;
 
+my %prereq = (
+  'Test::More' => '0.45',
+);
+
 WriteMakefile(
   NAME         => 'Devel::Tokenizer::C',
   VERSION_FROM => 'lib/Devel/Tokenizer/C.pm',
+  PREREQ_PM    => \%prereq,
   realclean    => { FILES => 'dtcrun dtcrun.c dtcrun.exe dtcdata' },
   CONFIGURE    => \&configure,
 );

@@ -1,4 +1,11 @@
 -------------------------
+Version 0.07 (2008-04-19)
+-------------------------
+
+* fix bug in the test suite where some test cases were
+  randomly generating wrong results
+
+-------------------------
 Version 0.06 (2008-04-13)
 -------------------------
 
