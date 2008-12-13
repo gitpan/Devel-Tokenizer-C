@@ -10,8 +10,8 @@
 #
 # $Project: /Devel-Tokenizer-C $
 # $Author: mhx $
-# $Date: 2008/04/13 13:31:00 +0200 $
-# $Revision: 14 $
+# $Date: 2008/12/13 16:03:38 +0100 $
+# $Revision: 16 $
 # $Source: /lib/Devel/Tokenizer/C.pm $
 #
 ################################################################################
@@ -29,7 +29,7 @@ use strict;
 use Carp;
 use vars '$VERSION';
 
-$VERSION = do { my @r = '$Snapshot: /Devel-Tokenizer-C/0.07 $' =~ /(\d+\.\d+(?:_\d+)?)/; @r ? $r[0] : '9.99' };
+$VERSION = do { my @r = '$Snapshot: /Devel-Tokenizer-C/0.08 $' =~ /(\d+\.\d+(?:_\d+)?)/; @r ? $r[0] : '9.99' };
 
 my %DEF = (
   CaseSensitive => 1,
@@ -43,6 +43,7 @@ my %DEF = (
   # TokenSort     => sub { $_[0] cmp $_[1] },             # TODO?
   TokenString   => 'tokstr',
   UnknownLabel  => 'unknown',
+  UnknownCode   => undef,
 );
 
 sub new
@@ -112,11 +113,14 @@ $switch
 EOS
     }
 
-    $rv .= <<EOS;
+    my $unk = $self->__unknown__("$IND$I$I");
+
+    $rv .= <<EOS if $unk;
 $IND${I}default:
-$IND$I${I}goto $self->{UnknownLabel};
-$IND}
+$unk
 EOS
+
+    $rv .= "$IND}\n"
   }
   else {
     return $self->__makeit__($IND, undef, 0, 0, $self->{__tokens__});
@@ -160,6 +164,16 @@ sub __commented__
   sprintf "%-50s/* %-$self->{__maxlen__}s */\n", $code, __quotecomment__($comment);
 }
 
+sub __unknown__
+{
+  my($self, $indent) = @_;
+  my $code = defined $self->{UnknownCode} ? $self->{UnknownCode}
+                                          : "goto $self->{UnknownLabel};";
+  $code =~ s/\s+$//;
+  $code =~ s/^/$indent/m;
+  return $code;
+}
+
 sub __makeit__
 {
   my($self, $IND, $order, $level, $pre_flag, $t, %tok) = @_;
@@ -170,7 +184,7 @@ sub __makeit__
   if (keys(%$t) == 1) {
     my($token) = keys %$t;
     my($rvs,$code);
-    my $goto = '';
+    my $unknown = '';
 
     if ($level > length $token) {
       $rvs = $self->__commented__($IND.'{', $token);
@@ -191,7 +205,7 @@ sub __makeit__
         $cmp .= $self->{TokenString} . "[$level] == $self->{TokenEnd}";
       }
 
-      $goto = "\n${IND}goto $self->{UnknownLabel};\n" if $cmp;
+      $unknown = "\n" . $self->__unknown__($IND) . "\n" if $cmp;
 
       $rvs = ($cmp ? $IND . "if ($cmp)\n" : '') .  $self->__commented__($IND.'{', $token);
 
@@ -199,7 +213,7 @@ sub __makeit__
       $code =~ s/^/$IND$I/mg;
     }
 
-    return "$rvs$code$IND}\n$goto";
+    return "$rvs$code$IND}\n$unknown";
   }
 
   for my $n (keys %$t) {
@@ -231,7 +245,7 @@ sub __makeit__
     $rvs .= $IND."switch ($self->{TokenString}\[$pos])\n".$IND."{\n";
   }
   else {
-    $bke = "\n${IND}goto $self->{UnknownLabel};\n" unless @{$self->{__backup__}};
+    $bke = "\n" . $self->__unknown__($IND) . "\n" unless @{$self->{__backup__}};
     push @{$self->{__backup__}}, [$pos, $self->__chr2cmp__($pos, keys %tok)];
   }
 
@@ -268,11 +282,13 @@ sub __makeit__
   }
 
   if (keys %tok > 1 || !$self->{MergeSwitches}) {
+    my $unk = $self->__unknown__("$IND$I$I");
+
+    $unk = "$IND${I}default:\n$unk\n" if $unk;
+
     return <<EOS . $bke;
 $rvs
-$IND${I}default:
-$IND$I${I}goto $self->{UnknownLabel};
-$IND}
+$unk$IND}
 EOS
   }
   else {
@@ -700,6 +716,12 @@ The default is C<tokstr>.
 
 Label that should be jumped to via C<goto> if there's no keyword
 matching the token. The default is C<unknown>.
+
+=head3 UnknownCode =E<gt> STRING
+
+Code that should be executed if there's no keyword matching the token.
+This is an alternative to C<UnknownLabel>. If C<UnknownCode> is present,
+it will override C<UnknownLabel>.
 
 =head2 add_tokens
 

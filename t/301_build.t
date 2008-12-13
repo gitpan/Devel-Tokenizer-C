@@ -2,8 +2,8 @@
 #
 # $Project: /Devel-Tokenizer-C $
 # $Author: mhx $
-# $Date: 2008/04/19 18:05:27 +0200 $
-# $Revision: 8 $
+# $Date: 2008/12/13 16:00:43 +0100 $
+# $Revision: 9 $
 # $Source: /t/301_build.t $
 #
 ################################################################################
@@ -22,7 +22,7 @@ do 't/common.sub';
 
 $^W = 1;
 
-BEGIN { plan tests => 384 }
+BEGIN { plan tests => 768 }
 
 chomp(my @words = <DATA>);
 $_ = eval qq("$_") for @words;
@@ -32,6 +32,7 @@ my $skip = can_compile() ? '' : 'skip: cannot run compiler';
 my @configs = (
   [ppflags  => [0, 1]],
   [case     => [0, 1]],
+  [unk_code => [0, 1]],
   [merge    => [0, 1]],
   [comments => [0, 1]],
 );
@@ -65,7 +66,7 @@ sub run_tests
   my($skip, $words, $options) = @_;
   my $unknown = @$words;
   my(%words, %ucwords);
-  my $prefix;
+  my($prefix, $suffix);
   @words{@$words} = (0 .. $#$words);
   @ucwords{map uc, @$words} = (1)x@$words;
 
@@ -96,6 +97,16 @@ CODE
     push @args, Comments => $options->{comments};
   }
 
+  if ($options->{unk_code}) {
+    push @args, UnknownCode => "return KEY_UNKNOWN;";
+  }
+  else {
+    $suffix = <<CODE;
+unknown:
+  return KEY_UNKNOWN;
+CODE
+  }
+
   print "# ", join(', ', @args), "\n";
 
   my $t = new Devel::Tokenizer::C @args;
@@ -114,7 +125,7 @@ CODE
     $c--;
   }
 
-  my $src = gencode( $t, $words, $prefix );
+  my $src = gencode( $t, $words, $prefix, $suffix );
 
   my @ppflags;
   if( $options->{ppflags} ) {

@@ -2,8 +2,8 @@
 #
 # $Project: /Devel-Tokenizer-C $
 # $Author: mhx $
-# $Date: 2008/04/13 13:30:59 +0200 $
-# $Revision: 6 $
+# $Date: 2008/12/13 16:00:41 +0100 $
+# $Revision: 7 $
 # $Source: /t/common.sub $
 #
 ################################################################################
@@ -27,9 +27,10 @@ sub get_key
 
 sub gencode
 {
-  my($dtc, $words, $prefix) = @_;
+  my($dtc, $words, $prefix, $suffix) = @_;
 
   $prefix ||= '';
+  $suffix ||= '';
 
   my $code = $dtc->generate;
   my $enum = join "\n", map "  KEY_".get_key($_).",", @$words;
@@ -48,8 +49,7 @@ Keyword tokenize( const char *tokstr )
 {
 $prefix
 $code
-unknown:
-  return KEY_UNKNOWN;
+$suffix
 }
 
 int main( int argc, char **argv )
